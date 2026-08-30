@@ -1,0 +1,7 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. Compose provides its own Material 3 theming;
+         this only needs to be a sane no-action-bar shell for the Activity. -->
+    <style name="Theme.Riego" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+    </style>
+</resources>
