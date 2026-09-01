@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
@@ -22,12 +22,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -36,12 +40,34 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import info.malondaovalle.riego.R
+import info.malondaovalle.riego.data.settings.ThemeMode
+import info.malondaovalle.riego.ui.RiegoViewModelFactory
 import info.malondaovalle.riego.ui.theme.RiegoTheme
+
+@Composable
+fun SettingsScreen(
+    onBack: () -> Unit,
+    viewModel: SettingsViewModel = viewModel(factory = RiegoViewModelFactory),
+) {
+    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+
+    SettingsScreenContent(
+        themeMode = themeMode,
+        onThemeModeSelected = viewModel::setThemeMode,
+        onBack = onBack,
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+private fun SettingsScreenContent(
+    themeMode: ThemeMode,
+    onThemeModeSelected: (ThemeMode) -> Unit,
+    onBack: () -> Unit,
+) {
     Scaffold(
         containerColor = Color.Transparent,
         topBar = {
@@ -50,7 +76,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Volver")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
                     }
                 },
             )
@@ -62,31 +88,27 @@ fun SettingsScreen(onBack: () -> Unit) {
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
-                alpha = 0.4f
+                alpha = 0.4f,
             )
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
+                    .padding(innerPadding),
             ) {
                 SettingsCategory(title = "Cuenta")
                 SettingsItem(
                     icon = Icons.Default.Person,
                     title = "Perfil de usuario",
                     subtitle = "Gestiona tu información personal",
-                    onClick = {}
+                    onClick = {},
                 )
 
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
                 SettingsCategory(title = "Preferencias")
-                SettingsItem(
-                    icon = Icons.Default.Palette,
-                    title = "Tema oscuro",
-                    subtitle = "Usar colores oscuros en la interfaz",
-                    trailing = {
-                        Switch(checked = false, onCheckedChange = {})
-                    }
+                ThemeModeItem(
+                    selected = themeMode,
+                    onSelected = onThemeModeSelected,
                 )
                 SettingsItem(
                     icon = Icons.Default.Notifications,
@@ -94,7 +116,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     subtitle = "Recibir avisos de riego completado",
                     trailing = {
                         Switch(checked = true, onCheckedChange = {})
-                    }
+                    },
                 )
 
                 Spacer(modifier = Modifier.weight(1f))
@@ -105,8 +127,60 @@ fun SettingsScreen(onBack: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
-                        .padding(bottom = 24.dp)
+                        .padding(bottom = 24.dp),
                 )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ThemeModeItem(
+    selected: ThemeMode,
+    onSelected: (ThemeMode) -> Unit,
+) {
+    val options = listOf(
+        ThemeMode.SYSTEM to "Automático",
+        ThemeMode.LIGHT to "Claro",
+        ThemeMode.DARK to "Oscuro",
+    )
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Color.White.copy(alpha = 0.7f),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Palette,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "Tema", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = "Apariencia de la aplicación",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                options.forEachIndexed { index, (mode, label) ->
+                    SegmentedButton(
+                        selected = selected == mode,
+                        onClick = { onSelected(mode) },
+                        shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                    ) {
+                        Text(label)
+                    }
+                }
             }
         }
     }
@@ -118,7 +192,7 @@ private fun SettingsCategory(title: String) {
         text = title,
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 8.dp)
+        modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 8.dp),
     )
 }
 
@@ -128,36 +202,32 @@ private fun SettingsItem(
     title: String,
     subtitle: String? = null,
     onClick: (() -> Unit)? = null,
-    trailing: (@Composable () -> Unit)? = null
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     Surface(
         onClick = onClick ?: {},
         enabled = onClick != null,
         modifier = Modifier.fillMaxWidth(),
-        color = Color.White.copy(alpha = 0.7f) // Make items slightly transparent to see background
+        color = Color.White.copy(alpha = 0.7f),
     ) {
         Row(
-            modifier = Modifier
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 modifier = Modifier.size(24.dp),
-                tint = MaterialTheme.colorScheme.primary
+                tint = MaterialTheme.colorScheme.primary,
             )
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyLarge
-                )
+                Text(text = title, style = MaterialTheme.typography.bodyLarge)
                 if (subtitle != null) {
                     Text(
                         text = subtitle,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
@@ -174,6 +244,10 @@ private fun SettingsItem(
 @Composable
 private fun SettingsScreenPreview() {
     RiegoTheme {
-        SettingsScreen(onBack = {})
+        SettingsScreenContent(
+            themeMode = ThemeMode.SYSTEM,
+            onThemeModeSelected = {},
+            onBack = {},
+        )
     }
 }

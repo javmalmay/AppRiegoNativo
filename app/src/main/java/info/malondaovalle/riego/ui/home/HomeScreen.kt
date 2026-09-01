@@ -1,24 +1,36 @@
 package info.malondaovalle.riego.ui.home
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -26,11 +38,16 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -55,6 +72,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import info.malondaovalle.riego.R
 import info.malondaovalle.riego.data.devices.Device
+import info.malondaovalle.riego.data.discovery.DiscoveredDevice
+import info.malondaovalle.riego.data.discovery.normalizeMac
 import info.malondaovalle.riego.ui.RiegoViewModelFactory
 import info.malondaovalle.riego.ui.theme.RiegoTheme
 import java.time.LocalDateTime
@@ -66,19 +85,45 @@ private val lastSeenFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("
 fun HomeScreen(
     onLoggedOut: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenDevice: (deviceId: Int, name: String?, ip: String?, port: Int?) -> Unit,
     viewModel: HomeViewModel = viewModel(factory = RiegoViewModelFactory),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(state.loggedOut) {
         if (state.loggedOut) onLoggedOut()
     }
 
+    LaunchedEffect(state.actionMessage) {
+        state.actionMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.consumeActionMessage()
+        }
+    }
+
+    BackHandler(enabled = state.selectionMode) { viewModel.exitSelection() }
+
     HomeScreenContent(
         state = state,
+        snackbarHostState = snackbarHostState,
         onRetry = viewModel::loadDevices,
         onOpenSettings = onOpenSettings,
         onLogout = viewModel::logout,
+        onAddDiscovered = viewModel::addDiscoveredDevice,
+        onDeviceClick = { device ->
+            if (state.selectionMode) {
+                viewModel.onDeviceClick(device.id)
+            } else {
+                val local = state.discovered.firstOrNull {
+                    normalizeMac(it.mac) == normalizeMac(device.macAddress)
+                }
+                onOpenDevice(device.id, device.name, local?.ip, local?.port)
+            }
+        },
+        onDeviceLongPress = { device -> viewModel.onDeviceLongPress(device.id) },
+        onExitSelection = viewModel::exitSelection,
+        onDeleteSelected = viewModel::deleteSelected,
     )
 }
 
@@ -86,22 +131,91 @@ fun HomeScreen(
 @Composable
 private fun HomeScreenContent(
     state: HomeUiState,
+    snackbarHostState: SnackbarHostState,
     onRetry: () -> Unit,
     onOpenSettings: () -> Unit,
     onLogout: () -> Unit,
+    onAddDiscovered: (DiscoveredDevice) -> Unit,
+    onDeviceClick: (Device) -> Unit,
+    onDeviceLongPress: (Device) -> Unit,
+    onExitSelection: () -> Unit,
+    onDeleteSelected: () -> Unit,
 ) {
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Eliminar dispositivos") },
+            text = {
+                Text("Se quitarán ${state.selectedIds.size} dispositivo(s) de tu cuenta.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteDialog = false
+                        onDeleteSelected()
+                    },
+                ) { Text("Eliminar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancelar") }
+            },
+        )
+    }
+
     Scaffold(
         containerColor = Color.Transparent,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("Dispositivos") },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                actions = {
-                    AvatarMenu(
-                        username = state.username,
-                        onOpenSettings = onOpenSettings,
-                        onLogout = onLogout,
+                title = {
+                    Text(
+                        if (state.selectionMode) {
+                            "${state.selectedIds.size} seleccionados"
+                        } else {
+                            "Dispositivos"
+                        }
                     )
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                navigationIcon = {
+                    if (state.selectionMode) {
+                        IconButton(onClick = onExitSelection) {
+                            Icon(Icons.Default.Close, contentDescription = "Cancelar selección")
+                        }
+                    }
+                },
+                actions = {
+                    if (state.selectionMode) {
+                        if (state.deleting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .padding(horizontal = 12.dp)
+                                    .size(20.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            IconButton(
+                                onClick = { showDeleteDialog = true },
+                                enabled = state.selectedIds.isNotEmpty(),
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Eliminar")
+                            }
+                        }
+                    } else {
+                        IconButton(
+                            onClick = onRetry,
+                            enabled = !state.loading && !state.discovering,
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Actualizar")
+                        }
+                        AvatarMenu(
+                            username = state.username,
+                            onOpenSettings = onOpenSettings,
+                            onLogout = onLogout,
+                        )
+                    }
                 },
             )
         },
@@ -112,31 +226,54 @@ private fun HomeScreenContent(
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
-                alpha = 0.4f
+                alpha = 0.4f,
             )
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding),
-                contentAlignment = Alignment.Center,
             ) {
-                when {
-                    state.loading && state.devices.isEmpty() -> CircularProgressIndicator()
+                if (state.discovering) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
 
-                    state.error != null && state.devices.isEmpty() -> ErrorState(
-                        message = state.error,
-                        onRetry = onRetry,
+                if (state.newDevices.isNotEmpty() && !state.selectionMode) {
+                    NewDevicesBanner(
+                        devices = state.newDevices,
+                        addingMacs = state.addingMacs,
+                        onAdd = onAddDiscovered,
                     )
+                }
 
-                    state.showEmpty -> Text(
-                        text = "No tienes dispositivos asociados",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(24.dp),
-                    )
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    when {
+                        state.loading && state.devices.isEmpty() -> CircularProgressIndicator()
 
-                    else -> DeviceGrid(devices = state.devices)
+                        state.error != null && state.devices.isEmpty() -> ErrorState(
+                            message = state.error,
+                            onRetry = onRetry,
+                        )
+
+                        state.devices.isEmpty() && state.newDevices.isEmpty() -> Text(
+                            text = "No tienes dispositivos asociados",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(24.dp),
+                        )
+
+                        else -> DeviceGrid(
+                            devices = state.devices,
+                            localMacs = state.localMacs,
+                            selectionMode = state.selectionMode,
+                            selectedIds = state.selectedIds,
+                            onClick = onDeviceClick,
+                            onLongPress = onDeviceLongPress,
+                        )
+                    }
                 }
             }
         }
@@ -144,7 +281,14 @@ private fun HomeScreenContent(
 }
 
 @Composable
-private fun DeviceGrid(devices: List<Device>) {
+private fun DeviceGrid(
+    devices: List<Device>,
+    localMacs: Set<String>,
+    selectionMode: Boolean,
+    selectedIds: Set<Int>,
+    onClick: (Device) -> Unit,
+    onLongPress: (Device) -> Unit,
+) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
         modifier = Modifier.fillMaxSize(),
@@ -153,25 +297,52 @@ private fun DeviceGrid(devices: List<Device>) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(devices, key = { it.id }) { device ->
-            DeviceCard(device)
+            DeviceCard(
+                device = device,
+                isLocal = normalizeMac(device.macAddress) in localMacs,
+                selectionMode = selectionMode,
+                selected = device.id in selectedIds,
+                onClick = { onClick(device) },
+                onLongClick = { onLongPress(device) },
+            )
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DeviceCard(device: Device) {
+private fun DeviceCard(
+    device: Device,
+    isLocal: Boolean,
+    selectionMode: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     Box(modifier = Modifier.fillMaxWidth()) {
+        val cardShape = RoundedCornerShape(12.dp)
         ElevatedCard(
-            modifier = Modifier.fillMaxWidth(),
+            shape = cardShape,
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (selected) {
+                        Modifier.border(2.dp, MaterialTheme.colorScheme.primary, cardShape)
+                    } else {
+                        Modifier
+                    }
+                )
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick),
             colors = CardDefaults.elevatedCardColors(
-                containerColor = if (device.isOnline)
+                containerColor = if (device.isOnline) {
                     MaterialTheme.colorScheme.surface
-                else
+                } else {
                     MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                },
             ),
             elevation = CardDefaults.elevatedCardElevation(
-                defaultElevation = if (device.isOnline) 6.dp else 2.dp
-            )
+                defaultElevation = if (device.isOnline) 6.dp else 2.dp,
+            ),
         ) {
             Column(
                 modifier = Modifier
@@ -184,7 +355,22 @@ private fun DeviceCard(device: Device) {
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(end = 24.dp)
+                    modifier = Modifier.padding(end = 24.dp),
+                )
+
+                Text(
+                    text = device.macAddress,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Tag(
+                    text = if (isLocal) "Local" else "Remoto",
+                    color = if (isLocal) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 )
 
                 if (!device.isOnline) {
@@ -205,18 +391,129 @@ private fun DeviceCard(device: Device) {
             }
         }
 
-        if (device.isOnline) {
-            Icon(
+        when {
+            selectionMode -> Icon(
+                imageVector = if (selected) {
+                    Icons.Default.CheckCircle
+                } else {
+                    Icons.Default.RadioButtonUnchecked
+                },
+                contentDescription = if (selected) "Seleccionado" else "Sin seleccionar",
+                tint = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp)
+                    .size(24.dp),
+            )
+
+            device.isOnline -> Icon(
                 imageVector = Icons.Default.CheckCircle,
                 contentDescription = "Conectado",
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(12.dp)
-                    .size(24.dp)
+                    .size(24.dp),
             )
         }
     }
+}
+
+@Composable
+private fun NewDevicesBanner(
+    devices: List<DiscoveredDevice>,
+    addingMacs: Set<String>,
+    onAdd: (DiscoveredDevice) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Wifi,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = "${devices.size} dispositivo(s) nuevo(s) en tu red",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Contraer" else "Expandir",
+                )
+            }
+
+            if (expanded) {
+                Text(
+                    text = "Detectados en la red local pero no asociados a tu cuenta.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                devices.forEach { device ->
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = device.name,
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                            Text(
+                                text = buildString {
+                                    append(device.mac)
+                                    if (device.ip.isNotBlank()) append(" · ${device.ip}")
+                                    device.port?.let { append(":$it") }
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (normalizeMac(device.mac) in addingMacs) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            TextButton(onClick = { onAdd(device) }) { Text("Agregar") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Tag(text: String, color: Color) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = color,
+        modifier = Modifier
+            .clip(RoundedCornerShape(percent = 50))
+            .background(color.copy(alpha = 0.12f))
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    )
 }
 
 @Composable
@@ -326,10 +623,25 @@ private fun HomeScreenPreview() {
                         lastSeenAt = null,
                     ),
                 ),
+                localMacs = setOf("F528D2311BCF"),
+                newDevices = listOf(
+                    DiscoveredDevice(
+                        name = "Aspersor terraza",
+                        ip = "192.168.1.42",
+                        mac = "AA:BB:CC:DD:EE:99",
+                        port = 9123,
+                    ),
+                ),
             ),
+            snackbarHostState = remember { SnackbarHostState() },
             onRetry = {},
             onOpenSettings = {},
             onLogout = {},
+            onAddDiscovered = {},
+            onDeviceClick = {},
+            onDeviceLongPress = {},
+            onExitSelection = {},
+            onDeleteSelected = {},
         )
     }
 }

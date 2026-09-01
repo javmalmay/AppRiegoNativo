@@ -30,7 +30,7 @@ android {
             buildConfigField(
                 "String",
                 "API_BASE_URL",
-                "\"https://10.0.2.2:7179/\""
+                "\"https://srv.malondaovalle.info/\""
             )
             buildConfigField("boolean", "TRUST_ALL_CERTS", "true")
         }
@@ -43,7 +43,7 @@ android {
             buildConfigField(
                 "String",
                 "API_BASE_URL",
-                "\"https://api.example.com/\""
+                "\"https://srv.malondaovalle.info/\""
             )
             buildConfigField("boolean", "TRUST_ALL_CERTS", "false")
         }

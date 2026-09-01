@@ -10,6 +10,23 @@ data class DevicesResponse(
     val devices: List<DeviceDto> = emptyList(),
 )
 
+/** Body for POST /api/Devices (associate a device with the account). */
+@Serializable
+data class RegisterDeviceRequest(
+    val macAddress: String,
+    val name: String,
+)
+
+/** Response shape for POST /api/Devices. */
+@Serializable
+data class DeviceActionResponse(
+    val success: Boolean = false,
+    val message: String? = null,
+    val device: DeviceDto? = null,
+    /** Per-device credential issued on registration. Captured but not used yet. */
+    val deviceToken: String? = null,
+)
+
 @Serializable
 data class DeviceDto(
     val id: Int = 0,

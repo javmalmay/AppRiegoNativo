@@ -1,5 +1,6 @@
 package info.malondaovalle.riego.ui.navigation
 
+import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
@@ -9,12 +10,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import info.malondaovalle.riego.data.auth.StartDestination
 import info.malondaovalle.riego.ui.RiegoViewModelFactory
 import info.malondaovalle.riego.ui.bootstrap.BootstrapViewModel
+import info.malondaovalle.riego.ui.device.DeviceScreen
 import info.malondaovalle.riego.ui.home.HomeScreen
 import info.malondaovalle.riego.ui.login.LoginScreen
 import info.malondaovalle.riego.ui.register.RegisterScreen
@@ -25,6 +29,13 @@ object Routes {
     const val REGISTER = "register"
     const val HOME = "home"
     const val SETTINGS = "settings"
+    const val DEVICE = "device"
+
+    fun device(deviceId: Int, name: String?, ip: String?, port: Int?): String =
+        "$DEVICE/$deviceId" +
+            "?name=${Uri.encode(name.orEmpty())}" +
+            "&ip=${Uri.encode(ip.orEmpty())}" +
+            "&port=${port ?: -1}"
 }
 
 const val REGISTERED_MESSAGE_KEY = "registered_message"
@@ -84,10 +95,24 @@ fun RiegoNavHost() {
                     }
                 },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                onOpenDevice = { deviceId, name, ip, port ->
+                    navController.navigate(Routes.device(deviceId, name, ip, port))
+                },
             )
         }
         composable(Routes.SETTINGS) {
             SettingsScreen(onBack = { navController.popBackStack() })
+        }
+        composable(
+            route = "${Routes.DEVICE}/{deviceId}?name={name}&ip={ip}&port={port}",
+            arguments = listOf(
+                navArgument("deviceId") { type = NavType.IntType },
+                navArgument("name") { type = NavType.StringType; defaultValue = "" },
+                navArgument("ip") { type = NavType.StringType; defaultValue = "" },
+                navArgument("port") { type = NavType.IntType; defaultValue = -1 },
+            ),
+        ) {
+            DeviceScreen(onBack = { navController.popBackStack() })
         }
     }
 }
