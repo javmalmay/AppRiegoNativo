@@ -144,7 +144,7 @@ private fun RegisterScreenContent(
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Text(
-                            text = "Únete a Riego Nativo",
+                            text = "Únete a Riego",
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary,

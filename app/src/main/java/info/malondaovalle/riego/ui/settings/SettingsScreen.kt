@@ -1,6 +1,7 @@
 package info.malondaovalle.riego.ui.settings
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,27 +12,36 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -73,7 +83,10 @@ private fun SettingsScreenContent(
         topBar = {
             TopAppBar(
                 title = { Text("Ajustes") },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                ),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
@@ -93,31 +106,49 @@ private fun SettingsScreenContent(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding),
+                    .padding(innerPadding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
             ) {
                 SettingsCategory(title = "Cuenta")
-                SettingsItem(
-                    icon = Icons.Default.Person,
-                    title = "Perfil de usuario",
-                    subtitle = "Gestiona tu información personal",
-                    onClick = {},
-                )
-
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                ElevatedCard(
+                    colors = CardDefaults.elevatedCardColors(
+                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+                    ),
+                    shape = MaterialTheme.shapes.large
+                ) {
+                    SettingsItem(
+                        icon = Icons.Default.Person,
+                        title = "Perfil de usuario",
+                        subtitle = "Gestiona tu información personal",
+                        onClick = {},
+                    )
+                }
 
                 SettingsCategory(title = "Preferencias")
-                ThemeModeItem(
-                    selected = themeMode,
-                    onSelected = onThemeModeSelected,
-                )
-                SettingsItem(
-                    icon = Icons.Default.Notifications,
-                    title = "Notificaciones",
-                    subtitle = "Recibir avisos de riego completado",
-                    trailing = {
-                        Switch(checked = true, onCheckedChange = {})
-                    },
-                )
+                ElevatedCard(
+                    colors = CardDefaults.elevatedCardColors(
+                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+                    ),
+                    shape = MaterialTheme.shapes.large
+                ) {
+                    ThemeModeItem(
+                        selected = themeMode,
+                        onSelected = onThemeModeSelected,
+                    )
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                    )
+                    SettingsItem(
+                        icon = Icons.Default.Notifications,
+                        title = "Notificaciones",
+                        subtitle = "Recibir avisos de riego completado",
+                        trailing = {
+                            Switch(checked = true, onCheckedChange = {})
+                        },
+                    )
+                }
 
                 Spacer(modifier = Modifier.weight(1f))
 
@@ -127,7 +158,7 @@ private fun SettingsScreenContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
-                        .padding(bottom = 24.dp),
+                        .padding(vertical = 24.dp),
                 )
             }
         }
@@ -145,41 +176,59 @@ private fun ThemeModeItem(
         ThemeMode.LIGHT to "Claro",
         ThemeMode.DARK to "Oscuro",
     )
+    var expanded by remember { mutableStateOf(false) }
 
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = Color.White.copy(alpha = 0.7f),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Palette,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                    tint = MaterialTheme.colorScheme.primary,
+    Column(modifier = Modifier.padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Default.Palette,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = "Tema", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = "Apariencia de la aplicación",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(modifier = Modifier.width(16.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "Tema", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        text = "Apariencia de la aplicación",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
+        }
 
-            Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                options.forEachIndexed { index, (mode, label) ->
-                    SegmentedButton(
-                        selected = selected == mode,
-                        onClick = { onSelected(mode) },
-                        shape = SegmentedButtonDefaults.itemShape(index, options.size),
-                    ) {
-                        Text(label)
-                    }
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = it },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            val currentLabel = options.find { it.first == selected }?.second ?: ""
+            OutlinedTextField(
+                value = currentLabel,
+                onValueChange = {},
+                readOnly = true,
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                modifier = Modifier
+                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, true)
+                    .fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium
+            )
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                options.forEach { (mode, label) ->
+                    DropdownMenuItem(
+                        text = { Text(label) },
+                        onClick = {
+                            onSelected(mode)
+                            expanded = false
+                        },
+                        contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding
+                    )
                 }
             }
         }
@@ -192,7 +241,7 @@ private fun SettingsCategory(title: String) {
         text = title,
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 8.dp),
+        modifier = Modifier.padding(start = 8.dp, top = 16.dp, bottom = 8.dp),
     )
 }
 
@@ -204,37 +253,33 @@ private fun SettingsItem(
     onClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
-    Surface(
-        onClick = onClick ?: {},
-        enabled = onClick != null,
-        modifier = Modifier.fillMaxWidth(),
-        color = Color.White.copy(alpha = 0.7f),
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(modifier = Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = title, style = MaterialTheme.typography.bodyLarge)
-                if (subtitle != null) {
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(24.dp),
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.bodyLarge)
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            if (trailing != null) {
-                Box(modifier = Modifier.padding(start = 16.dp)) {
-                    trailing()
-                }
+        }
+        if (trailing != null) {
+            Box(modifier = Modifier.padding(start = 16.dp)) {
+                trailing()
             }
         }
     }

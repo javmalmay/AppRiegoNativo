@@ -3,6 +3,7 @@ package info.malondaovalle.riego.ui.device
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import info.malondaovalle.riego.data.device.CanalDuracionDto
 import info.malondaovalle.riego.data.device.CommandResult
 import info.malondaovalle.riego.data.device.DeviceChannel
 import info.malondaovalle.riego.data.device.DeviceCommand
@@ -10,6 +11,7 @@ import info.malondaovalle.riego.data.device.DeviceCommander
 import info.malondaovalle.riego.data.device.DeviceConfigResponse
 import info.malondaovalle.riego.data.device.DeviceControl
 import info.malondaovalle.riego.data.device.LocalEndpoint
+import info.malondaovalle.riego.data.device.DraftChannel
 import info.malondaovalle.riego.data.device.MAX_DEVICE_CHANNELS
 import info.malondaovalle.riego.data.device.ProgramDraft
 import info.malondaovalle.riego.data.device.ProgramRepetition
@@ -18,6 +20,7 @@ import info.malondaovalle.riego.data.device.normalizeProgramDate
 import info.malondaovalle.riego.data.device.toDeviceControl
 import info.malondaovalle.riego.data.device.toDraft
 import info.malondaovalle.riego.data.device.toProgramaDto
+import info.malondaovalle.riego.data.notifications.UserSocket
 import info.malondaovalle.riego.data.remote.NetworkModule
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,16 +38,22 @@ data class DeviceUiState(
     val nameBusy: Boolean = false,
     val channelBusy: Boolean = false,
     val programBusy: Boolean = false,
+    /** A `PARARRIEGO` / `CANCELARCANAL` command is in flight. */
+    val wateringBusy: Boolean = false,
     /** Non-null while the add/modify program editor is open. */
     val editingProgram: ProgramDraft? = null,
     /** Ids of programs selected for deletion (empty = not in selection mode). */
     val programSelection: Set<Int> = emptySet(),
+    /** Non-null while the manual-watering channel picker is open. */
+    val manualWatering: List<DraftChannel>? = null,
+    val manualBusy: Boolean = false,
     val message: String? = null,
 )
 
 class DeviceViewModel(
     savedStateHandle: SavedStateHandle,
     private val commander: DeviceCommander,
+    private val userSocket: UserSocket,
 ) : ViewModel() {
 
     private val deviceId: Int = checkNotNull(savedStateHandle.get<Int>("deviceId"))
@@ -60,6 +69,14 @@ class DeviceViewModel(
 
     init {
         load()
+        viewModelScope.launch {
+            // Server pushes for this device -> re-fetch its config.
+            userSocket.deviceUpdates.collect { id ->
+                if (id == deviceId && _state.value.editingProgram == null && _state.value.manualWatering == null) {
+                    load()
+                }
+            }
+        }
     }
 
     fun load() {
@@ -217,6 +234,73 @@ class DeviceViewModel(
         }
     }
 
+    // --- Watering in progress -------------------------------------------------
+
+    /** Cancel the whole run (`PARARRIEGO`). */
+    fun stopWatering() {
+        if (_state.value.wateringBusy) return
+        _state.update { it.copy(wateringBusy = true) }
+        viewModelScope.launch {
+            when (val result = commander.send(deviceId, local, DeviceCommand("PARARRIEGO"))) {
+                is CommandResult.Ok -> {
+                    val ok = result.payload.uppercase().contains("OK")
+                    _state.update {
+                        it.copy(
+                            wateringBusy = false,
+                            message = if (ok) "Riego detenido" else "El dispositivo rechazó la parada",
+                        )
+                    }
+                    if (ok) load()
+                }
+                is CommandResult.Error ->
+                    _state.update { it.copy(wateringBusy = false, message = result.message) }
+            }
+        }
+    }
+
+    /** Cancel one pending channel (`CANCELARCANAL` + channel id); drop it from the list. */
+    fun cancelWateringChannel(channelId: Int) {
+        if (_state.value.wateringBusy) return
+        val control = _state.value.control ?: return
+        val previous = control.pending
+        _state.update {
+            it.copy(
+                wateringBusy = true,
+                control = it.control?.copy(
+                    pending = previous.filterNot { p -> p.channelId == channelId },
+                ),
+            )
+        }
+        viewModelScope.launch {
+            val command = DeviceCommand("CANCELARCANAL", channelId.toString())
+            when (val result = commander.send(deviceId, local, command)) {
+                is CommandResult.Ok -> {
+                    val ok = result.payload.uppercase().contains("OK")
+                    if (ok) {
+                        _state.update { it.copy(wateringBusy = false) }
+                        load()
+                    } else {
+                        _state.update {
+                            it.copy(
+                                wateringBusy = false,
+                                control = it.control?.copy(pending = previous),
+                                message = "El dispositivo rechazó cancelar el canal",
+                            )
+                        }
+                    }
+                }
+                is CommandResult.Error ->
+                    _state.update {
+                        it.copy(
+                            wateringBusy = false,
+                            control = it.control?.copy(pending = previous),
+                            message = result.message,
+                        )
+                    }
+            }
+        }
+    }
+
     // --- Programs ----------------------------------------------------------
 
     fun startAddProgram() {
@@ -272,6 +356,28 @@ class DeviceViewModel(
         }
     }
 
+    /** "Regar ahora" on a program card — runs that program immediately. */
+    fun runProgramNow(programId: Int) {
+        if (_state.value.programBusy) return
+        _state.update { it.copy(programBusy = true) }
+        viewModelScope.launch {
+            when (val result = commander.send(deviceId, local, DeviceCommand("RIEGOPROGRAMAMANUAL", programId.toString()))) {
+                is CommandResult.Ok -> {
+                    val ok = result.payload.uppercase().contains("OK")
+                    _state.update {
+                        it.copy(
+                            programBusy = false,
+                            message = if (ok) "Riego iniciado" else "El dispositivo rechazó el riego",
+                        )
+                    }
+                    if (ok) load()
+                }
+                is CommandResult.Error ->
+                    _state.update { it.copy(programBusy = false, message = result.message) }
+            }
+        }
+    }
+
     fun toggleProgramSelection(programId: Int) = _state.update {
         val next = if (programId in it.programSelection) {
             it.programSelection - programId
@@ -311,6 +417,41 @@ class DeviceViewModel(
                 )
             }
             load()
+        }
+    }
+
+    // --- Manual watering -------------------------------------------------
+
+    fun startManualWatering() = _state.update { it.copy(manualWatering = emptyList()) }
+
+    fun updateManualWatering(channels: List<DraftChannel>) =
+        _state.update { it.copy(manualWatering = channels) }
+
+    fun cancelManualWatering() = _state.update { it.copy(manualWatering = null) }
+
+    fun sendManualWatering() {
+        val channels = _state.value.manualWatering ?: return
+        if (_state.value.manualBusy || channels.isEmpty()) return
+        _state.update { it.copy(manualBusy = true) }
+        viewModelScope.launch {
+            val payload = NetworkModule.json.encodeToString(
+                channels.sortedBy { it.channelId }.map { CanalDuracionDto(it.channelId, it.minutes) },
+            )
+            when (val result = commander.send(deviceId, local, DeviceCommand("RIEGOMANUALMULTIPLE", payload))) {
+                is CommandResult.Ok -> {
+                    val ok = result.payload.uppercase().contains("OK")
+                    _state.update {
+                        it.copy(
+                            manualBusy = false,
+                            manualWatering = if (ok) null else it.manualWatering,
+                            message = if (ok) "Riego manual iniciado" else "El dispositivo rechazó el riego manual",
+                        )
+                    }
+                    if (ok) load()
+                }
+                is CommandResult.Error ->
+                    _state.update { it.copy(manualBusy = false, message = result.message) }
+            }
         }
     }
 

@@ -24,11 +24,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Umbrella
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -60,7 +65,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -71,6 +80,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import info.malondaovalle.riego.R
+import info.malondaovalle.riego.data.device.DeviceRuntimeState
 import info.malondaovalle.riego.data.devices.Device
 import info.malondaovalle.riego.data.discovery.DiscoveredDevice
 import info.malondaovalle.riego.data.discovery.normalizeMac
@@ -124,6 +134,7 @@ fun HomeScreen(
         onDeviceLongPress = { device -> viewModel.onDeviceLongPress(device.id) },
         onExitSelection = viewModel::exitSelection,
         onDeleteSelected = viewModel::deleteSelected,
+        onRetryNotifications = viewModel::retryNotifications,
     )
 }
 
@@ -140,6 +151,7 @@ private fun HomeScreenContent(
     onDeviceLongPress: (Device) -> Unit,
     onExitSelection: () -> Unit,
     onDeleteSelected: () -> Unit,
+    onRetryNotifications: () -> Unit,
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
 
@@ -237,6 +249,10 @@ private fun HomeScreenContent(
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
 
+                if (state.notificationsDown && !state.selectionMode) {
+                    NotificationsWarningBanner(onRetry = onRetryNotifications)
+                }
+
                 if (state.newDevices.isNotEmpty() && !state.selectionMode) {
                     NewDevicesBanner(
                         devices = state.newDevices,
@@ -250,12 +266,24 @@ private fun HomeScreenContent(
                     contentAlignment = Alignment.Center,
                 ) {
                     when {
-                        state.loading && state.devices.isEmpty() -> CircularProgressIndicator()
-
                         state.error != null && state.devices.isEmpty() -> ErrorState(
                             message = state.error,
                             onRetry = onRetry,
                         )
+
+                        // Block until devices are loaded AND the LAN sweep has run,
+                        // so we know each device's local/remote status before it's opened.
+                        !state.initialSyncDone -> Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            CircularProgressIndicator()
+                            Text(
+                                text = "Buscando dispositivos en la red…",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
 
                         state.devices.isEmpty() && state.newDevices.isEmpty() -> Text(
                             text = "No tienes dispositivos asociados",
@@ -268,6 +296,7 @@ private fun HomeScreenContent(
                         else -> DeviceGrid(
                             devices = state.devices,
                             localMacs = state.localMacs,
+                            deviceStates = state.deviceStates,
                             selectionMode = state.selectionMode,
                             selectedIds = state.selectedIds,
                             onClick = onDeviceClick,
@@ -284,22 +313,31 @@ private fun HomeScreenContent(
 private fun DeviceGrid(
     devices: List<Device>,
     localMacs: Set<String>,
+    deviceStates: Map<Int, DeviceRuntimeState>,
     selectionMode: Boolean,
     selectedIds: Set<Int>,
     onClick: (Device) -> Unit,
     onLongPress: (Device) -> Unit,
 ) {
+    val configuration = LocalConfiguration.current
+    val columns = if (configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+        GridCells.Fixed(2)
+    } else {
+        GridCells.Fixed(1)
+    }
+
     LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
+        columns = columns,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         items(devices, key = { it.id }) { device ->
             DeviceCard(
                 device = device,
                 isLocal = normalizeMac(device.macAddress) in localMacs,
+                runtime = deviceStates[device.id],
                 selectionMode = selectionMode,
                 selected = device.id in selectedIds,
                 onClick = { onClick(device) },
@@ -314,6 +352,7 @@ private fun DeviceGrid(
 private fun DeviceCard(
     device: Device,
     isLocal: Boolean,
+    runtime: DeviceRuntimeState?,
     selectionMode: Boolean,
     selected: Boolean,
     onClick: () -> Unit,
@@ -355,24 +394,26 @@ private fun DeviceCard(
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(end = 24.dp),
+                    modifier = Modifier.padding(end = 32.dp),
                 )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    StatusIcon(
+                        imageVector = if (isLocal) Icons.Default.Wifi else Icons.Default.Cloud,
+                        contentDescription = if (isLocal) "Local" else "Remoto",
+                        color = if (isLocal) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
 
-                Text(
-                    text = device.macAddress,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                Tag(
-                    text = if (isLocal) "Local" else "Remoto",
-                    color = if (isLocal) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-
+                    if (runtime != null) {
+                        DeviceStatusRow(runtime)
+                    }
+                }
                 if (!device.isOnline) {
                     Text(
                         text = device.lastSeenAt
@@ -391,33 +432,61 @@ private fun DeviceCard(
             }
         }
 
-        when {
-            selectionMode -> Icon(
-                imageVector = if (selected) {
-                    Icons.Default.CheckCircle
-                } else {
-                    Icons.Default.RadioButtonUnchecked
-                },
-                contentDescription = if (selected) "Seleccionado" else "Sin seleccionar",
-                tint = if (selected) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(12.dp)
-                    .size(24.dp),
-            )
+        // Action/Warning Icons at top right
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            if (runtime?.powerRiego == false) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = "Sin power de riego",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+            if (selectionMode) {
+                Icon(
+                    imageVector = if (selected) {
+                        Icons.Default.CheckCircle
+                    } else {
+                        Icons.Default.RadioButtonUnchecked
+                    },
+                    contentDescription = if (selected) "Seleccionado" else "Sin seleccionar",
+                    tint = if (selected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+        }
+    }
+}
 
-            device.isOnline -> Icon(
-                imageVector = Icons.Default.CheckCircle,
-                contentDescription = "Conectado",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(12.dp)
-                    .size(24.dp),
+@Composable
+private fun DeviceStatusRow(runtime: DeviceRuntimeState) {
+    if (!runtime.watering && !runtime.raining) return
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (runtime.watering) {
+            StatusIcon(
+                imageVector = Icons.Default.WaterDrop,
+                contentDescription = "Regando",
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        if (runtime.raining) {
+            StatusIcon(
+                painter = painterResource(R.drawable.outline_rainy_24),
+                contentDescription = "Lloviendo",
+                color = MaterialTheme.colorScheme.tertiary
             )
         }
     }
@@ -504,16 +573,68 @@ private fun NewDevicesBanner(
 }
 
 @Composable
-private fun Tag(text: String, color: Color) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelSmall,
-        color = color,
+private fun NotificationsWarningBanner(onRetry: () -> Unit) {
+    ElevatedCard(
         modifier = Modifier
-            .clip(RoundedCornerShape(percent = 50))
-            .background(color.copy(alpha = 0.12f))
-            .padding(horizontal = 8.dp, vertical = 2.dp),
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(imageVector = Icons.Default.CloudOff, contentDescription = null)
+            Text(
+                text = "Sin conexión con el servicio de notificaciones",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onRetry) { Text("Reintentar") }
+        }
+    }
+}
+
+@Composable
+private fun StatusIcon(
+    imageVector: ImageVector,
+    contentDescription: String,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    StatusIcon(
+        painter = rememberVectorPainter(imageVector),
+        contentDescription = contentDescription,
+        color = color,
+        modifier = modifier
     )
+}
+
+@Composable
+private fun StatusIcon(
+    painter: Painter,
+    contentDescription: String,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(color.copy(alpha = 0.12f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            painter = painter,
+            contentDescription = contentDescription,
+            tint = color,
+            modifier = Modifier.size(22.dp)
+        )
+    }
 }
 
 @Composable
@@ -624,6 +745,21 @@ private fun HomeScreenPreview() {
                     ),
                 ),
                 localMacs = setOf("F528D2311BCF"),
+                initialSyncDone = true,
+                deviceStates = mapOf(
+                    1 to DeviceRuntimeState(
+                        powerRiego = true,
+                        watering = true,
+                        raining = false,
+                        boardConnected = true,
+                    ),
+                    2 to DeviceRuntimeState(
+                        powerRiego = false,
+                        watering = false,
+                        raining = true,
+                        boardConnected = true,
+                    ),
+                ),
                 newDevices = listOf(
                     DiscoveredDevice(
                         name = "Aspersor terraza",
@@ -642,6 +778,7 @@ private fun HomeScreenPreview() {
             onDeviceLongPress = {},
             onExitSelection = {},
             onDeleteSelected = {},
+            onRetryNotifications = {},
         )
     }
 }

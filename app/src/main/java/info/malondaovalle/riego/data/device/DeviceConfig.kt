@@ -1,9 +1,13 @@
 package info.malondaovalle.riego.data.device
 
+import info.malondaovalle.riego.data.remote.NetworkModule
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNames
+import kotlinx.serialization.json.JsonObject
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -78,6 +82,18 @@ data class Estado(
     @SerialName("PowerRiego") val powerRiego: Boolean = false,
     @SerialName("PlacaConectada") val placaConectada: Boolean = false,
     @SerialName("Lloviendo") val lloviendo: Boolean = false,
+    /**
+     * Channels of the run in progress. The first entry is the one watering right
+     * now (with the seconds it has left); the rest are queued with their full
+     * duration. Empty when the device is not watering.
+     */
+    @SerialName("Pendiente") val pendiente: List<PendienteDto> = emptyList(),
+)
+
+@Serializable
+data class PendienteDto(
+    @SerialName("Canal") val canal: Int = 0,
+    @SerialName("SegundosRestantes") val segundosRestantes: Int = 0,
 )
 
 // --- UI domain -----------------------------------------------------------------
@@ -88,15 +104,33 @@ const val MAX_DEVICE_CHANNELS = 16
 data class DeviceControl(
     val name: String,
     val powerOn: Boolean,
+    /** Hardware power to the irrigation circuit (`Estado.PowerRiego`). */
+    val powerRiego: Boolean,
     val watering: Boolean,
     val nextWatering: String?,
     val boardConnected: Boolean,
     val raining: Boolean,
     val channels: List<DeviceChannel>,
     val programs: List<WateringProgram>,
+    /** Non-empty while a run is in progress: channel + seconds left, in watering order. */
+    val pending: List<PendingChannel> = emptyList(),
 )
 
 data class DeviceChannel(val id: Int, val name: String, val active: Boolean)
+
+/** A channel in the run currently in progress. */
+data class PendingChannel(val channelId: Int, val name: String, val secondsRemaining: Int)
+
+/**
+ * Just the runtime state of a device (the `Estado` part of GETCONFIG), fetched on
+ * its own with the `GETESTADO` command for the device list.
+ */
+data class DeviceRuntimeState(
+    val powerRiego: Boolean,
+    val watering: Boolean,
+    val raining: Boolean,
+    val boardConnected: Boolean,
+)
 
 data class WateringProgram(
     /** Device-assigned id (0 only for a not-yet-saved program). */
@@ -202,6 +236,8 @@ fun DeviceConfigResponse.toDeviceControl(fallbackName: String): DeviceControl {
     return DeviceControl(
         name = programador?.nombre?.takeIf { it.isNotBlank() } ?: fallbackName,
         powerOn = programador?.activo ?: false,
+        // Only warn when the device explicitly reports no power (null = unknown).
+        powerRiego = estado?.powerRiego != false,
         watering = estado?.regando ?: false,
         nextWatering = estado?.proximoRiego?.takeIf { it.isNotBlank() },
         boardConnected = estado?.placaConectada ?: false,
@@ -209,6 +245,13 @@ fun DeviceConfigResponse.toDeviceControl(fallbackName: String): DeviceControl {
         channels = configuracion?.canales.orEmpty()
             .sortedBy { it.id }
             .map { DeviceChannel(it.id, it.nombre, it.activo) },
+        pending = estado?.pendiente.orEmpty().map {
+            PendingChannel(
+                channelId = it.canal,
+                name = channelNames[it.canal] ?: "Canal ${it.canal}",
+                secondsRemaining = it.segundosRestantes,
+            )
+        },
         programs = programador?.programas.orEmpty().mapIndexed { index, p ->
             WateringProgram(
                 id = p.id,
@@ -232,4 +275,37 @@ fun DeviceConfigResponse.toDeviceControl(fallbackName: String): DeviceControl {
             )
         },
     )
+}
+
+fun Estado.toRuntimeState(): DeviceRuntimeState = DeviceRuntimeState(
+    powerRiego = powerRiego,
+    watering = regando,
+    raining = lloviendo,
+    boardConnected = placaConectada,
+)
+
+/**
+ * `GETESTADO` reply. It may come back as the bare `Estado` object or wrapped like
+ * GETCONFIG (`{"Estado": {...}}`) — accept both.
+ */
+fun parseEstado(raw: String): Estado? {
+    val wrapped = runCatching {
+        NetworkModule.json.decodeFromString<DeviceConfigResponse>(raw).estado
+    }.getOrNull()
+    if (wrapped != null) return wrapped
+    return runCatching { NetworkModule.json.decodeFromString<Estado>(raw) }.getOrNull()
+}
+
+private val ESTADO_KEYS =
+    setOf("Estado", "Regando", "PowerRiego", "Lloviendo", "PlacaConectada", "ProximoRiego", "Pendiente")
+
+/**
+ * Same as [parseEstado] but for a WebSocket `device_status` payload. Returns `null`
+ * unless the object actually carries state keys, so arbitrary firmware telemetry
+ * isn't mistaken for an all-`false` [Estado].
+ */
+fun parseEstado(payload: JsonElement): Estado? {
+    val obj = payload as? JsonObject ?: return null
+    if (ESTADO_KEYS.none { it in obj }) return null
+    return parseEstado(obj.toString())
 }

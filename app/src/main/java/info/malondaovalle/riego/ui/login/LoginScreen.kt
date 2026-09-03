@@ -154,7 +154,7 @@ private fun LoginScreenContent(
                         )
 
                         Text(
-                            text = "Riego Nativo",
+                            text = "Riego",
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary

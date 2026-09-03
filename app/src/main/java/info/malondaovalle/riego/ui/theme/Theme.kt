@@ -36,12 +36,18 @@ private val DarkColors = darkColorScheme(
     onPrimary = Color.Black,
     primaryContainer = DarkPlantGreen,
     onPrimaryContainer = LightPlantGreen,
-    secondary = LightWaterBlue,
-    onSecondary = DarkWaterBlue,
+    secondary = LightPlantGreen,
+    onSecondary = DarkPlantGreen,
+    secondaryContainer = DarkPlantGreen,
+    onSecondaryContainer = LightPlantGreen,
+    tertiary = LightWaterBlue,
+    onTertiary = DarkWaterBlue,
     background = Color(0xFF1A1C19),
-    onBackground = LightWaterBlue,
+    onBackground = GardenWhite,
     surface = Color(0xFF1A1C19),
-    onSurface = LightWaterBlue,
+    onSurface = GardenWhite,
+    surfaceVariant = MudGrey,
+    onSurfaceVariant = GardenWhite.copy(alpha = 0.7f),
 )
 
 @Composable
@@ -61,6 +67,7 @@ fun RiegoTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
+        typography = Typography,
         content = content,
     )
 }

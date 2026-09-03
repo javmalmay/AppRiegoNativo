@@ -4,6 +4,13 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import info.malondaovalle.riego.data.auth.AuthRepository
+import info.malondaovalle.riego.data.device.CommandResult
+import info.malondaovalle.riego.data.device.DeviceCommand
+import info.malondaovalle.riego.data.device.DeviceCommander
+import info.malondaovalle.riego.data.device.DeviceRuntimeState
+import info.malondaovalle.riego.data.device.LocalEndpoint
+import info.malondaovalle.riego.data.device.parseEstado
+import info.malondaovalle.riego.data.device.toRuntimeState
 import info.malondaovalle.riego.data.devices.Device
 import info.malondaovalle.riego.data.devices.DeviceActionResult
 import info.malondaovalle.riego.data.devices.DevicesRepository
@@ -13,9 +20,12 @@ import info.malondaovalle.riego.data.discovery.DeviceTcpClient
 import info.malondaovalle.riego.data.discovery.DiscoveredDevice
 import info.malondaovalle.riego.data.discovery.TokenPushResult
 import info.malondaovalle.riego.data.discovery.normalizeMac
+import info.malondaovalle.riego.data.notifications.SocketState
+import info.malondaovalle.riego.data.notifications.UserSocket
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -43,6 +53,16 @@ data class HomeUiState(
     val selectedIds: Set<Int> = emptySet(),
     /** `true` while the selected devices are being deleted. */
     val deleting: Boolean = false,
+    /** The notifications WebSocket could not connect. */
+    val notificationsDown: Boolean = false,
+    /**
+     * `false` until the first devices load + first LAN discovery both finish. The
+     * screen stays on a full-screen loader until then, so a device can't be opened
+     * before we know whether it's local or remote.
+     */
+    val initialSyncDone: Boolean = false,
+    /** Per-device runtime state from `GETESTADO` (missing until it answers). */
+    val deviceStates: Map<Int, DeviceRuntimeState> = emptyMap(),
 ) {
     val showEmpty: Boolean
         get() = !loading && error == null && devices.isEmpty()
@@ -53,6 +73,8 @@ class HomeViewModel(
     private val devicesRepository: DevicesRepository,
     private val discoveryService: DeviceDiscoveryService,
     private val deviceTcpClient: DeviceTcpClient,
+    private val commander: DeviceCommander,
+    private val userSocket: UserSocket,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(HomeUiState())
@@ -63,13 +85,51 @@ class HomeViewModel(
     private val seenDevices = LinkedHashMap<String, DiscoveredDevice>()
     private val seenAt = HashMap<String, Long>()
 
+    // Device ids with a GETESTADO in flight, so bursts of WS events don't pile up.
+    private val refreshingStates = mutableSetOf<Int>()
+
     init {
         viewModelScope.launch {
             val name = authRepository.currentSession()?.username.orEmpty()
             _state.update { it.copy(username = name) }
         }
+        viewModelScope.launch {
+            userSocket.state.collectLatest { socketState ->
+                _state.update { it.copy(notificationsDown = socketState is SocketState.Error) }
+            }
+        }
+        viewModelScope.launch {
+            // Real-time connectivity: reflect device_online / device_offline in the
+            // list and re-pull that device's runtime state.
+            userSocket.connectivity.collect { event ->
+                _state.update { state ->
+                    state.copy(
+                        devices = state.devices.map {
+                            if (it.id == event.deviceId) it.copy(isOnline = event.online) else it
+                        },
+                    )
+                }
+                refreshDeviceState(event.deviceId)
+            }
+        }
+        viewModelScope.launch {
+            // device_status carries the new Estado in its payload — apply it directly,
+            // falling back to a GETESTADO round-trip if it can't be parsed.
+            userSocket.deviceStatus.collect { event ->
+                val estado = event.payload?.let { parseEstado(it) }
+                if (estado != null) {
+                    _state.update {
+                        it.copy(deviceStates = it.deviceStates + (event.deviceId to estado.toRuntimeState()))
+                    }
+                } else {
+                    refreshDeviceState(event.deviceId)
+                }
+            }
+        }
         loadDevices()
     }
+
+    fun retryNotifications() = userSocket.reconnect()
 
     fun loadDevices() {
         if (_state.value.loading) return
@@ -115,10 +175,44 @@ class HomeViewModel(
             _state.update { current ->
                 current.copy(
                     discovering = false,
+                    initialSyncDone = true,
                     discovered = known,
                     localMacs = localMacs,
                     newDevices = known.filter { normalizeMac(it.mac) !in registeredMacs },
                 )
+            }
+            refreshDeviceStates()
+        }
+    }
+
+    /**
+     * Pulls the runtime state (`GETESTADO`) of every registered device — local ones
+     * over TCP, the rest through the WebSocket — into [HomeUiState.deviceStates].
+     */
+    private fun refreshDeviceStates() {
+        _state.value.devices.forEach { refreshDeviceState(it.id) }
+    }
+
+    /** Re-pulls one device's `GETESTADO`, e.g. after a WebSocket event for it. */
+    private fun refreshDeviceState(deviceId: Int) {
+        val device = _state.value.devices.firstOrNull { it.id == deviceId } ?: return
+        if (!refreshingStates.add(deviceId)) return // one already running for this device
+        val local = _state.value.discovered
+            .firstOrNull { normalizeMac(it.mac) == normalizeMac(device.macAddress) }
+            ?.let { d -> d.port?.let { port -> LocalEndpoint(d.ip, port) } }
+        viewModelScope.launch {
+            try {
+                when (val result = commander.send(deviceId, local, DeviceCommand("GETESTADO"))) {
+                    is CommandResult.Ok -> {
+                        val estado = parseEstado(result.payload) ?: return@launch
+                        _state.update {
+                            it.copy(deviceStates = it.deviceStates + (deviceId to estado.toRuntimeState()))
+                        }
+                    }
+                    is CommandResult.Error -> Unit // leave this device's state unknown
+                }
+            } finally {
+                refreshingStates.remove(deviceId)
             }
         }
     }

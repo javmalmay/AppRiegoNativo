@@ -15,4 +15,5 @@ val DarkPlantGreen = Color(0xFF1B5E20)
 // Accents and UI
 val FreshCyan = Color(0xFF00BCD4)
 val GardenWhite = Color(0xFFF1F8E9)
-val MudGrey = Color(0xFF37474F)
+val MudGrey = Color(0xFF263238) // Darker for better contrast
+val LightMudGrey = Color(0xFF78909C)

@@ -34,6 +34,9 @@ object NetworkModule {
         ignoreUnknownKeys = true
         explicitNulls = false
         coerceInputValues = true
+        // Command payloads (SETPROGRAMAUNICO with Id=0, {Id,Duracion}, …) must send
+        // every field even when it equals the Kotlin default.
+        encodeDefaults = true
     }
 
     fun createAuthApi(): AuthApi =
@@ -48,6 +51,20 @@ object NetworkModule {
             .authenticator(TokenAuthenticator(sessionStore, authRepository))
             .build()
         return retrofit(client).create(DevicesApi::class.java)
+    }
+
+    /** Client for the user notifications WebSocket (keeps the connection alive). */
+    fun webSocketClient(): OkHttpClient =
+        baseClientBuilder()
+            .pingInterval(20, TimeUnit.SECONDS)
+            .build()
+
+    /** `{API_BASE_URL}` with a `ws(s)` scheme + `ws/user`. */
+    fun userSocketUrl(): String {
+        val base = BuildConfig.API_BASE_URL.trimEnd('/')
+            .replaceFirst("https://", "wss://")
+            .replaceFirst("http://", "ws://")
+        return "$base/ws/user"
     }
 
     private fun retrofit(client: OkHttpClient): Retrofit {

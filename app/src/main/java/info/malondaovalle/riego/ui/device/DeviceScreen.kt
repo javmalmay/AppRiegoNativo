@@ -25,9 +25,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Umbrella
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -35,6 +39,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -61,6 +66,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -68,12 +74,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import info.malondaovalle.riego.R
 import info.malondaovalle.riego.data.device.DeviceChannel
 import info.malondaovalle.riego.data.device.DeviceControl
 import info.malondaovalle.riego.data.device.MAX_DEVICE_CHANNELS
+import info.malondaovalle.riego.data.device.PendingChannel
 import info.malondaovalle.riego.data.device.ProgramChannel
 import info.malondaovalle.riego.data.device.ProgramRepetition
 import info.malondaovalle.riego.data.device.WateringProgram
@@ -111,6 +119,21 @@ fun DeviceScreen(
         return
     }
 
+    val manual = state.manualWatering
+    if (manual != null && editorControl != null) {
+        BackHandler { viewModel.cancelManualWatering() }
+        ManualWateringScreen(
+            channels = manual,
+            deviceChannels = editorControl.channels,
+            busy = state.manualBusy,
+            snackbarHostState = snackbarHostState,
+            onChange = viewModel::updateManualWatering,
+            onConfirm = viewModel::sendManualWatering,
+            onCancel = viewModel::cancelManualWatering,
+        )
+        return
+    }
+
     DeviceScreenContent(
         state = state,
         snackbarHostState = snackbarHostState,
@@ -118,14 +141,18 @@ fun DeviceScreen(
         onRetry = viewModel::load,
         onSetPower = viewModel::setPower,
         onRenameDevice = viewModel::setDeviceName,
+        onStopWatering = viewModel::stopWatering,
+        onCancelWateringChannel = viewModel::cancelWateringChannel,
         onAddChannel = viewModel::addChannel,
         onUpdateChannel = viewModel::updateChannel,
         onDeleteChannel = viewModel::deleteChannel,
         onAddProgram = viewModel::startAddProgram,
         onEditProgram = viewModel::startEditProgram,
+        onRunProgram = viewModel::runProgramNow,
         onToggleProgramSelection = viewModel::toggleProgramSelection,
         onClearProgramSelection = viewModel::clearProgramSelection,
         onDeleteSelectedPrograms = viewModel::deleteSelectedPrograms,
+        onStartManualWatering = viewModel::startManualWatering,
     )
 }
 
@@ -138,14 +165,18 @@ private fun DeviceScreenContent(
     onRetry: () -> Unit,
     onSetPower: (Boolean) -> Unit,
     onRenameDevice: (String) -> Unit,
+    onStopWatering: () -> Unit,
+    onCancelWateringChannel: (id: Int) -> Unit,
     onAddChannel: (id: Int, name: String, active: Boolean) -> Unit,
     onUpdateChannel: (oldId: Int, newId: Int, name: String, active: Boolean) -> Unit,
     onDeleteChannel: (id: Int) -> Unit,
     onAddProgram: () -> Unit,
     onEditProgram: (id: Int) -> Unit,
+    onRunProgram: (id: Int) -> Unit,
     onToggleProgramSelection: (id: Int) -> Unit,
     onClearProgramSelection: () -> Unit,
     onDeleteSelectedPrograms: () -> Unit,
+    onStartManualWatering: () -> Unit,
 ) {
     var renaming by remember { mutableStateOf(false) }
     val control = state.control
@@ -218,16 +249,21 @@ private fun DeviceScreenContent(
                         powerBusy = state.powerBusy,
                         channelBusy = state.channelBusy,
                         programBusy = state.programBusy,
+                        wateringBusy = state.wateringBusy,
                         programSelection = state.programSelection,
                         onSetPower = onSetPower,
+                        onStopWatering = onStopWatering,
+                        onCancelWateringChannel = onCancelWateringChannel,
                         onAddChannel = onAddChannel,
                         onUpdateChannel = onUpdateChannel,
                         onDeleteChannel = onDeleteChannel,
                         onAddProgram = onAddProgram,
                         onEditProgram = onEditProgram,
+                        onRunProgram = onRunProgram,
                         onToggleProgramSelection = onToggleProgramSelection,
                         onClearProgramSelection = onClearProgramSelection,
                         onDeleteSelectedPrograms = onDeleteSelectedPrograms,
+                        onStartManualWatering = onStartManualWatering,
                     )
                 }
             }
@@ -241,16 +277,21 @@ private fun DeviceContent(
     powerBusy: Boolean,
     channelBusy: Boolean,
     programBusy: Boolean,
+    wateringBusy: Boolean,
     programSelection: Set<Int>,
     onSetPower: (Boolean) -> Unit,
+    onStopWatering: () -> Unit,
+    onCancelWateringChannel: (id: Int) -> Unit,
     onAddChannel: (id: Int, name: String, active: Boolean) -> Unit,
     onUpdateChannel: (oldId: Int, newId: Int, name: String, active: Boolean) -> Unit,
     onDeleteChannel: (id: Int) -> Unit,
     onAddProgram: () -> Unit,
     onEditProgram: (id: Int) -> Unit,
+    onRunProgram: (id: Int) -> Unit,
     onToggleProgramSelection: (id: Int) -> Unit,
     onClearProgramSelection: () -> Unit,
     onDeleteSelectedPrograms: () -> Unit,
+    onStartManualWatering: () -> Unit,
 ) {
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     val tabs = listOf("Programas", "Canales")
@@ -274,13 +315,18 @@ private fun DeviceContent(
                 control = control,
                 powerBusy = powerBusy,
                 programBusy = programBusy,
+                wateringBusy = wateringBusy,
                 selection = programSelection,
                 onSetPower = onSetPower,
+                onStopWatering = onStopWatering,
+                onCancelWateringChannel = onCancelWateringChannel,
                 onAddProgram = onAddProgram,
                 onEditProgram = onEditProgram,
+                onRunProgram = onRunProgram,
                 onToggleSelection = onToggleProgramSelection,
                 onClearSelection = onClearProgramSelection,
                 onDeleteSelected = onDeleteSelectedPrograms,
+                onStartManualWatering = onStartManualWatering,
             )
             else -> ChannelsTab(
                 channels = control.channels,
@@ -299,16 +345,22 @@ private fun ProgramsTab(
     control: DeviceControl,
     powerBusy: Boolean,
     programBusy: Boolean,
+    wateringBusy: Boolean,
     selection: Set<Int>,
     onSetPower: (Boolean) -> Unit,
+    onStopWatering: () -> Unit,
+    onCancelWateringChannel: (id: Int) -> Unit,
     onAddProgram: () -> Unit,
     onEditProgram: (id: Int) -> Unit,
+    onRunProgram: (id: Int) -> Unit,
     onToggleSelection: (id: Int) -> Unit,
     onClearSelection: () -> Unit,
     onDeleteSelected: () -> Unit,
+    onStartManualWatering: () -> Unit,
 ) {
     val selectionMode = selection.isNotEmpty()
     var confirmDelete by remember { mutableStateOf(false) }
+    var runConfirm by remember { mutableStateOf<WateringProgram?>(null) }
 
     BackHandler(enabled = selectionMode) { onClearSelection() }
 
@@ -318,8 +370,46 @@ private fun ProgramsTab(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item { PowerCard(control = control, powerBusy = powerBusy, onSetPower = onSetPower) }
-            item { NextWateringCard(control = control) }
+            if (!selectionMode && !control.powerRiego) {
+                item {
+                    AlertBanner(
+                        text = "Sin alimentación de riego: el dispositivo no puede regar.",
+                        icon = Icons.Default.Warning,
+                        container = MaterialTheme.colorScheme.error,
+                        content = MaterialTheme.colorScheme.onError,
+                    )
+                }
+            }
+            if (!selectionMode && control.raining) {
+                item {
+                    AlertBanner(
+                        text = "Está lloviendo",
+                        icon = Icons.Default.Umbrella,
+                        container = MaterialTheme.colorScheme.secondaryContainer,
+                        content = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
+            }
+            if (!selectionMode && (control.watering || control.pending.isNotEmpty())) {
+                item {
+                    WateringCard(
+                        pending = control.pending,
+                        busy = wateringBusy,
+                        onStopAll = onStopWatering,
+                        onCancelChannel = onCancelWateringChannel,
+                    )
+                }
+            }
+            item {
+                DeviceStatusCard(
+                    control = control,
+                    powerBusy = powerBusy,
+                    onSetPower = onSetPower
+                )
+            }
+            if (!selectionMode) {
+                item { ManualWateringCard(onStart = onStartManualWatering) }
+            }
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -350,10 +440,12 @@ private fun ProgramsTab(
                     program = program,
                     selected = program.id in selection,
                     selectionMode = selectionMode,
+                    runEnabled = !programBusy,
                     onClick = {
                         if (selectionMode) onToggleSelection(program.id) else onEditProgram(program.id)
                     },
                     onLongClick = { onToggleSelection(program.id) },
+                    onRunNow = { runConfirm = program },
                 )
             }
         }
@@ -397,6 +489,25 @@ private fun ProgramsTab(
             },
             dismissButton = {
                 TextButton(onClick = { confirmDelete = false }) { Text("Cancelar") }
+            },
+        )
+    }
+
+    runConfirm?.let { program ->
+        AlertDialog(
+            onDismissRequest = { runConfirm = null },
+            title = { Text("Regar ahora") },
+            text = { Text("¿Iniciar ahora el riego del programa ${program.index + 1}?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        runConfirm = null
+                        onRunProgram(program.id)
+                    },
+                ) { Text("Regar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { runConfirm = null }) { Text("Cancelar") }
             },
         )
     }
@@ -572,7 +683,7 @@ private fun ChannelRow(
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         colors = CardDefaults.outlinedCardColors(
-            containerColor = Color.White.copy(alpha = 0.7f),
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
         ),
     ) {
         Row(
@@ -729,7 +840,7 @@ private fun RenameDeviceDialog(
 }
 
 @Composable
-private fun PowerCard(
+private fun DeviceStatusCard(
     control: DeviceControl,
     powerBusy: Boolean,
     onSetPower: (Boolean) -> Unit,
@@ -737,22 +848,22 @@ private fun PowerCard(
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.elevatedCardColors(
-            containerColor = Color.White.copy(alpha = 0.85f),
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
         ),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Riego", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        text = if (control.powerOn) "Encendido" else "Apagado",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Activar",
+                    style = MaterialTheme.typography.titleMedium
+                )
                 if (powerBusy) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(24.dp),
@@ -763,40 +874,191 @@ private fun PowerCard(
                 }
             }
 
-            val flags = buildList {
-                if (control.watering) add("Regando ahora")
-                if (!control.boardConnected) add("Placa desconectada")
-                if (control.raining) add("Lloviendo")
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            )
+
+            Column {
+                Text(
+                    text = "Próximo riego",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = control.nextWatering ?: "Sin programación",
+                    style = MaterialTheme.typography.headlineSmall,
+                )
             }
-            if (flags.isNotEmpty()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    flags.forEach { StatusPill(it, MaterialTheme.colorScheme.secondary) }
-                }
-            }
+
+            
         }
     }
 }
 
 @Composable
-private fun NextWateringCard(control: DeviceControl) {
+private fun ManualWateringCard(onStart: () -> Unit) {
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
         ),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = "Próximo riego",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.WaterDrop,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
             )
-            Text(
-                text = control.nextWatering ?: "Sin programación",
-                style = MaterialTheme.typography.headlineSmall,
-            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp),
+            ) {
+                Text("Riego manual", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = "Riega los canales que elijas ahora mismo",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Button(onClick = onStart) { Text("Iniciar") }
         }
     }
+}
+
+@Composable
+private fun AlertBanner(
+    text: String,
+    icon: ImageVector,
+    container: Color,
+    content: Color,
+) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = container,
+            contentColor = content,
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(imageVector = icon, contentDescription = null)
+            Text(text = text, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+private fun WateringCard(
+    pending: List<PendingChannel>,
+    busy: Boolean,
+    onStopAll: () -> Unit,
+    onCancelChannel: (id: Int) -> Unit,
+) {
+    // Local countdown: seed from the device, then tick the active (first) channel
+    // down every second until the next GETCONFIG refresh re-seeds us.
+    var remaining by remember(pending) {
+        mutableStateOf(pending.associate { it.channelId to it.secondsRemaining })
+    }
+    LaunchedEffect(pending) {
+        val activeId = pending.firstOrNull()?.channelId ?: return@LaunchedEffect
+        while (true) {
+            delay(1_000)
+            remaining = remaining.mapValues { (id, secs) ->
+                if (id == activeId) (secs - 1).coerceAtLeast(0) else secs
+            }
+        }
+    }
+
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.9f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.WaterDrop,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = "Regando ahora",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 12.dp),
+                )
+            }
+
+            if (pending.isEmpty()) {
+                Text(
+                    text = "El dispositivo está regando.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                pending.forEachIndexed { index, channel ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = channel.name, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                text = if (index == 0) "En curso" else "En espera",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            text = formatSeconds(remaining[channel.channelId] ?: channel.secondsRemaining),
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        IconButton(
+                            onClick = { onCancelChannel(channel.channelId) },
+                            enabled = !busy,
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Cancelar canal")
+                        }
+                    }
+                }
+            }
+
+            Button(
+                onClick = onStopAll,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                }
+                Text("Cancelar todo el riego")
+            }
+        }
+    }
+}
+
+private fun formatSeconds(total: Int): String {
+    val s = total.coerceAtLeast(0)
+    return "%d:%02d".format(s / 60, s % 60)
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -805,8 +1067,10 @@ private fun ProgramCard(
     program: WateringProgram,
     selected: Boolean,
     selectionMode: Boolean,
+    runEnabled: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onRunNow: () -> Unit,
 ) {
     val shape = RoundedCornerShape(12.dp)
     OutlinedCard(
@@ -822,7 +1086,7 @@ private fun ProgramCard(
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         colors = CardDefaults.outlinedCardColors(
-            containerColor = Color.White.copy(alpha = 0.7f),
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
         ),
     ) {
         Column(
@@ -882,6 +1146,22 @@ private fun ProgramCard(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
+
+            if (!selectionMode) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onRunNow, enabled = runEnabled) {
+                        Icon(
+                            imageVector = Icons.Default.WaterDrop,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text("Regar ahora", modifier = Modifier.padding(start = 4.dp))
+                    }
+                }
+            }
         }
     }
 }
@@ -902,11 +1182,11 @@ private fun InfoLine(label: String, value: String) {
 private fun StatusPill(text: String, color: Color) {
     Text(
         text = text,
-        style = MaterialTheme.typography.labelSmall,
+        style = MaterialTheme.typography.labelLarge, // Increased size
         color = color,
         modifier = Modifier
-            .background(color.copy(alpha = 0.12f), RoundedCornerShape(percent = 50))
-            .padding(horizontal = 8.dp, vertical = 2.dp),
+            .background(color.copy(alpha = 0.15f), RoundedCornerShape(percent = 50))
+            .padding(horizontal = 12.dp, vertical = 4.dp),
     )
 }
 
@@ -921,7 +1201,8 @@ private fun DeviceScreenPreview() {
                 control = DeviceControl(
                     name = "Riego-Casa",
                     powerOn = true,
-                    watering = false,
+                    powerRiego = true,
+                    watering = true,
                     nextWatering = "01/09/2026 09:00",
                     boardConnected = true,
                     raining = false,
@@ -929,6 +1210,11 @@ private fun DeviceScreenPreview() {
                         DeviceChannel(1, "Palmera", true),
                         DeviceChannel(2, "Goteo jardinera", true),
                         DeviceChannel(6, "Madroño", false),
+                    ),
+                    pending = listOf(
+                        PendingChannel(3, "Seto", 95),
+                        PendingChannel(4, "Césped", 360),
+                        PendingChannel(5, "Rosales", 120),
                     ),
                     programs = listOf(
                         WateringProgram(
@@ -966,14 +1252,18 @@ private fun DeviceScreenPreview() {
             onRetry = {},
             onSetPower = {},
             onRenameDevice = {},
+            onStopWatering = {},
+            onCancelWateringChannel = {},
             onAddChannel = { _, _, _ -> },
             onUpdateChannel = { _, _, _, _ -> },
             onDeleteChannel = {},
             onAddProgram = {},
             onEditProgram = {},
+            onRunProgram = {},
             onToggleProgramSelection = {},
             onClearProgramSelection = {},
             onDeleteSelectedPrograms = {},
+            onStartManualWatering = {},
         )
     }
 }

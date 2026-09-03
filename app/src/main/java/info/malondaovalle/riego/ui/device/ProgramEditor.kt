@@ -144,7 +144,10 @@ fun ProgramEditor(
                         TextButton(
                             onClick = onSave,
                             enabled = canSave,
-                            colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF2E7D32))
+                            colors = ButtonDefaults.textButtonColors(
+                                containerColor = Color(0xFF2E7D32).copy(alpha = 0.1f),
+                                contentColor = Color(0xFF2E7D32)
+                            )
                         ) {
                             Text("Guardar", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                         }
@@ -170,7 +173,9 @@ fun ProgramEditor(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 ElevatedCard(
-                    colors = CardDefaults.elevatedCardColors(containerColor = Color.White.copy(alpha = 0.85f)),
+                    colors = CardDefaults.elevatedCardColors(
+                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+                    ),
                     shape = MaterialTheme.shapes.large
                 ) {
                     Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -360,7 +365,9 @@ private fun HoursSection(times: List<String>, onChange: (List<String>) -> Unit) 
     var confirmDeleteIndex by remember { mutableStateOf<Int?>(null) }
 
     ElevatedCard(
-        colors = CardDefaults.elevatedCardColors(containerColor = Color.White.copy(alpha = 0.85f)),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+        ),
         shape = MaterialTheme.shapes.large
     ) {
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -371,10 +378,15 @@ private fun HoursSection(times: List<String>, onChange: (List<String>) -> Unit) 
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f)
                 )
-                TextButton(onClick = {
-                    editingIndex = null
-                    showTimePicker = true
-                }) {
+                TextButton(
+                    onClick = {
+                        editingIndex = null
+                        showTimePicker = true
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                    )
+                ) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Text("Añadir", modifier = Modifier.padding(start = 4.dp), fontWeight = FontWeight.Bold)
                 }
@@ -492,9 +504,10 @@ private fun TimePickerDialog(
     }
 }
 
+/** Reused by [ProgramEditor] and the manual-watering screen. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChannelsSection(
+internal fun ChannelsSection(
     selected: List<DraftChannel>,
     deviceChannels: List<DeviceChannel>,
     onChange: (List<DraftChannel>) -> Unit,
@@ -515,7 +528,9 @@ private fun ChannelsSection(
     }
 
     ElevatedCard(
-        colors = CardDefaults.elevatedCardColors(containerColor = Color.White.copy(alpha = 0.85f)),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+        ),
         shape = MaterialTheme.shapes.large
     ) {
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -527,15 +542,30 @@ private fun ChannelsSection(
                     modifier = Modifier.weight(1f)
                 )
                 if (selectionMode) {
-                    TextButton(onClick = { selectionIds = emptySet() }) { Text("Cancelar") }
-                    TextButton(onClick = { confirmDelete = true }) {
-                        Text("Quitar", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                    TextButton(
+                        onClick = { selectionIds = emptySet() },
+                        colors = ButtonDefaults.textButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) { Text("Cancelar") }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        onClick = { confirmDelete = true },
+                        colors = ButtonDefaults.textButtonColors(
+                            containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Text("Quitar", fontWeight = FontWeight.Bold)
                     }
                 } else {
                     Box {
                         TextButton(
                             onClick = { pickerOpen = true },
                             enabled = available.isNotEmpty(),
+                            colors = ButtonDefaults.textButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                            )
                         ) {
                             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                             Text("Añadir", modifier = Modifier.padding(start = 4.dp), fontWeight = FontWeight.Bold)
@@ -636,7 +666,7 @@ private fun ChannelsSection(
 }
 
 @Composable
-private fun MinutesStepper(minutes: Int, onChange: (Int) -> Unit) {
+internal fun MinutesStepper(minutes: Int, onChange: (Int) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(
             onClick = { if (minutes > STEPPER_MIN) onChange(minutes - 1) },

@@ -1,12 +1,15 @@
 package info.malondaovalle.riego.data.auth
 
 import android.content.Context
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import info.malondaovalle.riego.data.security.CryptoManager
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import java.time.Instant
 
 private val Context.dataStore by preferencesDataStore(name = "riego_session")
@@ -21,24 +24,10 @@ class SessionStore(
     private val crypto: CryptoManager = CryptoManager(),
 ) {
 
-    suspend fun read(): Session? {
-        val prefs = context.dataStore.data.first()
-        val username = prefs[KEY_USERNAME] ?: return null
-        val encToken = prefs[KEY_TOKEN] ?: return null
-        val encRefresh = prefs[KEY_REFRESH_TOKEN] ?: return null
-        val tokenExpire = prefs[KEY_TOKEN_EXPIRE] ?: return null
-        val refreshExpire = prefs[KEY_REFRESH_EXPIRE] ?: return null
+    /** Emits on every change (login, refresh, logout). */
+    val session: Flow<Session?> = context.dataStore.data.map { it.toSession() }
 
-        return runCatching {
-            Session(
-                username = username,
-                token = crypto.decrypt(encToken),
-                refreshToken = crypto.decrypt(encRefresh),
-                tokenExpire = Instant.ofEpochMilli(tokenExpire),
-                refreshTokenExpire = Instant.ofEpochMilli(refreshExpire),
-            )
-        }.getOrNull()
-    }
+    suspend fun read(): Session? = context.dataStore.data.first().toSession()
 
     suspend fun save(session: Session) {
         context.dataStore.edit { prefs ->
@@ -52,6 +41,24 @@ class SessionStore(
 
     suspend fun clear() {
         context.dataStore.edit { it.clear() }
+    }
+
+    private fun Preferences.toSession(): Session? {
+        val username = this[KEY_USERNAME] ?: return null
+        val encToken = this[KEY_TOKEN] ?: return null
+        val encRefresh = this[KEY_REFRESH_TOKEN] ?: return null
+        val tokenExpire = this[KEY_TOKEN_EXPIRE] ?: return null
+        val refreshExpire = this[KEY_REFRESH_EXPIRE] ?: return null
+
+        return runCatching {
+            Session(
+                username = username,
+                token = crypto.decrypt(encToken),
+                refreshToken = crypto.decrypt(encRefresh),
+                tokenExpire = Instant.ofEpochMilli(tokenExpire),
+                refreshTokenExpire = Instant.ofEpochMilli(refreshExpire),
+            )
+        }.getOrNull()
     }
 
     private companion object {

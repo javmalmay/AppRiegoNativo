@@ -6,8 +6,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 
 /**
- * The command envelope understood by the device, both over local TCP and through
- * the API (`POST /api/Devices/{id}/Comando`). Same structure in both cases.
+ * The command envelope understood by the device firmware, over local TCP. For
+ * remote devices `DeviceCommander` repackages it as a `WsCommand` and the server
+ * forwards `Parametros` verbatim, so the firmware sees the same thing either way.
  * `Parametros` is always a string, even for boolean-ish values (e.g. `ACTIVAR`
  * takes `"true"`/`"false"`, not a raw JSON boolean).
  */

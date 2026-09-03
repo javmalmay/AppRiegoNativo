@@ -26,12 +26,15 @@ val RiegoViewModelFactory = viewModelFactory {
             devicesRepository = application(this).devicesRepository,
             discoveryService = application(this).deviceDiscoveryService,
             deviceTcpClient = application(this).deviceTcpClient,
+            commander = application(this).deviceCommander,
+            userSocket = application(this).userSocket,
         )
     }
     initializer {
         DeviceViewModel(
             savedStateHandle = createSavedStateHandle(),
             commander = application(this).deviceCommander,
+            userSocket = application(this).userSocket,
         )
     }
     initializer { SettingsViewModel(application(this).themePreferences) }
